@@ -376,7 +376,7 @@ function openR(r) {
       <div class="row-btns" style="flex:none"><button class="btn" type="button" id="pickT">${picks.includes(r.id) ? "In der Auswahl ✓" : "Zur Auswahl"}</button>
       <button class="btn" type="button" id="close">Schließen</button></div></div>
     ${img ? `<figure style="margin:0"><img class="hero" src="${esc(img)}" alt="${esc(r.t)}">
-      <figcaption class="credit">${r.imgc[3] === "symbolbild" ? "Symbolbild · " : ""}Foto: ${esc(r.imgc[0] || "unbekannt")} · ${esc(r.imgc[1])}${safeUrl(r.imgc[2]) ? ` · <a href="${esc(r.imgc[2])}" target="_blank" rel="noopener">Quelle</a>` : ""}</figcaption></figure>` : ""}
+      <figcaption class="credit">${r.imgc[3] === "ki" ? "KI-generiertes Bild, zeigt nicht das echte Gericht" : `${r.imgc[3] === "symbolbild" ? "Symbolbild · " : ""}Foto: ${esc(r.imgc[0] || "unbekannt")} · ${esc(r.imgc[1])}${safeUrl(r.imgc[2]) ? ` · <a href="${esc(r.imgc[2])}" target="_blank" rel="noopener">Quelle</a>` : ""}`}</figcaption></figure>` : ""}
     <div>${tags}</div>
     ${r.d ? `<p style="margin:0">${esc(r.d)}</p>` : ""}
     ${r.n ? `<div class="box"><h3>Je Portion ${r.sv ? `(${esc(r.svt || r.sv + " Portionen")})` : ""}</h3><div class="nut">
