@@ -1,8 +1,8 @@
 /* Kühlschrank – eigenes Modul für die Rezept-App.
    Tab "Kühlschrank": Zutaten per Kachel, Suche oder Foto angeben, passende Rezepte nach Abdeckung.
    Nutzt globale Helfer aus index.html: R, ratings, openR, togglePick, picks, esc, imgOf, srcBadge, showTab.
-   Fotoerkennung: in claude.ai über claude.use("sample"), in der iPhone-App (pwa.js, claude.local) über einen
-   eigenen Anthropic-API-Schlüssel, der nur auf dem Gerät liegt (localStorage "kb-apikey").
+   Fotoerkennung nur in der Claude-App (claude.use("sample")). In der iPhone-App (pwa.js, claude.local) gibt es
+   statt der Foto-Knöpfe einen Hinweis; Zutaten dort über Kacheln und Suche.
    Die Abgleich-Logik (KB.engine) hängt nicht vom DOM ab und wird in tests/kuehlschrank_test.js geprüft. */
 (function (root) {
 "use strict";
@@ -205,36 +205,10 @@ ${names.join(", ")}
 Antworte nur mit JSON in genau dieser Form:
 {"zutaten":[{"name":"Tomate","sicher":true},{"name":"Joghurt","sicher":false}],"hinweis":""}`;
 }
-const API_MODEL = "claude-opus-5-5";
-async function blobToB64(b) {
-  const buf = new Uint8Array(await b.arrayBuffer()); let s = "";
-  for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
-  return btoa(s);
-}
 function parseJson(txt) {
   const s = String(txt || ""), a = s.indexOf("{"), b = s.lastIndexOf("}");
   if (a < 0 || b < a) throw {code: "invalid_json"};
   try { return JSON.parse(s.slice(a, b + 1)); } catch (e) { throw {code: "invalid_json"}; }
-}
-async function viaApi(key, prompt, images, signal) {
-  const content = [];
-  for (const im of images) content.push({type: "image", source: {type: "base64", media_type: im.type || "image/jpeg", data: await blobToB64(im)}});
-  content.push({type: "text", text: prompt});
-  let res;
-  try {
-    res = await fetch("https://api.anthropic.com/v1/messages", {method: "POST", signal,
-      headers: {"content-type": "application/json", "x-api-key": key, "anthropic-version": "2026-10-21",
-        "anthropic-dangerous-direct-browser-access": "true", "anthropic-beta": "server-side-fallback-2026-07-01"},
-      body: JSON.stringify({model: API_MODEL, max_tokens: 4000, output_config: {effort: "low"}, fallbacks: "default",
-        messages: [{role: "user", content}]})});
-  } catch (e) { if (e && e.name === "AbortError") throw {code: "cancelled"}; throw {code: "offline"}; }
-  if (res.status === 401 || res.status === 403) throw {code: "bad_key"};
-  if (res.status === 429) throw {code: "rate_limited"};
-  if (res.status === 413) throw {code: "image_rejected"};
-  if (!res.ok) { let m = ""; try { m = (await res.json()).error.message } catch (e) {} throw {code: res.status === 400 && /credit|billing/i.test(m) ? "no_credit" : "api", msg: m}; }
-  const j = await res.json();
-  if (j.stop_reason === "refusal") throw {code: "refused"};
-  return parseJson((j.content || []).filter(c => c.type === "text").map(c => c.text).join(""));
 }
 
 /* ---------- Export für Tests ---------- */
@@ -294,7 +268,6 @@ const css = `
 .kb-rec .unsure { font-size: 12px; color: var(--warn); white-space: nowrap }
 .kb-thumbs { display: flex; gap: 6px; flex-wrap: wrap }
 .kb-thumbs img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line) }
-.kb-key input { font-size: 16px; min-height: 44px; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink) }
 .kb-err { color: var(--bad) }
 .kb-jump { min-height: 44px }
 @media (min-width: 900px) { .kb-jump { display: none } }
@@ -486,15 +459,9 @@ const ERR = {not_granted: "Du hast Claude für diese Seite nicht erlaubt. Ohne E
   session_expired: "Bitte bei Claude neu anmelden und nochmal versuchen.", image_rejected: "Das Foto war zu groß oder hat ein falsches Format. Bitte ein anderes nehmen.",
   refused: "Das Foto wurde abgelehnt. Bitte nur Kühlschrank oder Vorrat fotografieren.", invalid_json: "Die Antwort war unvollständig. Bitte nochmal versuchen.",
   empty_completion: "Keine Antwort erhalten. Bitte nochmal versuchen.", images_unavailable: "Fotos gehen hier leider nicht.",
-  bad_key: "Der API-Schlüssel stimmt nicht. Bitte prüfen und neu eingeben.", no_credit: "Auf dem Anthropic-Konto ist kein Guthaben. Bitte in der Anthropic Console aufladen.",
-  offline: "Keine Verbindung. Fotos auswerten geht nur mit Internet.", api: "Die Auswertung hat nicht geklappt. Bitte nochmal versuchen."};
+  offline: "Keine Verbindung. Fotos auswerten geht nur mit Internet."};
 const errTxt = e => ERR[e && e.code] || "Das hat nicht geklappt. Bitte nochmal versuchen.";
-const apiKey = () => { try { return localStorage.getItem("kb-apikey") || "" } catch (e) { return "" } };
-function backend() {
-  if (sample && (!sampleLim || sampleLim.images)) return "sample";
-  if (isLocal() && apiKey()) return "api";
-  return null;
-}
+function backend() { return sample && (!sampleLim || sampleLim.images) ? "sample" : null; }
 async function addPhotos(fl, input) {
   const files = [...(fl || [])].filter(f => /^image\//.test(f.type) || !f.type); input.value = "";
   if (!files.length) return;
@@ -502,20 +469,10 @@ async function addPhotos(fl, input) {
   for (const f of files) { if (photos.length >= max) break; photos.push(await shrinkImg(f)); }
   runPhoto();
 }
-function keyForm(msg) {
-  return `<div class="kb-key panel" style="margin-top:8px">${msg ? `<p class="kb-err" style="margin:0">${H(msg)}</p>` : ""}
-    <p style="margin:0">Fotos auswerten geht in der iPhone-App mit deinem eigenen Anthropic-API-Schlüssel. Er bleibt nur auf diesem iPhone und wird nur an Anthropic geschickt. Pro Foto kostet das ungefähr 1 bis 3 Cent.</p>
-    <p class="note" style="margin:0">Schlüssel erstellen: console.anthropic.com → API Keys → Create Key. Am besten ein Ausgabelimit setzen.</p>
-    <label for="kbKey" style="font-weight:600">API-Schlüssel</label>
-    <input id="kbKey" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="sk-ant-…">
-    <div class="kb-actions"><button class="btn primary" type="button" data-act="savekey">Speichern und auswerten</button><button class="btn" type="button" data-act="cancel">Abbrechen</button></div>
-    <p class="note" style="margin:0">Ohne Schlüssel kannst du deine Zutaten einfach über die Kacheln und die Suche angeben.</p></div>`;
-}
 async function runPhoto() {
   const out = g("kbPhoto"), be = backend();
   const thumbs = `<div class="kb-thumbs">${photos.map((p, i) => `<img src="${URL.createObjectURL(p)}" alt="Foto ${i + 1}">`).join("")}</div>`;
   if (!be) {
-    if (isLocal()) { out.innerHTML = thumbs + keyForm(); g("kbKey").focus(); return; }
     out.innerHTML = thumbs + `<p class="kb-err">Fotos auswerten geht hier nicht. Öffne die App in der Claude-App oder auf claude.ai, oder gib die Zutaten über die Kacheln an.</p>
       <div class="kb-actions"><button class="btn" type="button" data-act="cancel">Schließen</button></div>`; return;
   }
@@ -525,7 +482,7 @@ async function runPhoto() {
   const names = Object.values(eng().V).sort((a, b) => b.cnt - a.cnt).map(v => v.n);
   try {
     const prompt = photoPrompt(names);
-    const j = be === "sample" ? await sample.json(prompt, {images: photos, signal: ctl.signal, cache: false}) : await viaApi(apiKey(), prompt, photos, ctl.signal);
+    const j = await sample.json(prompt, {images: photos, signal: ctl.signal, cache: false});
     const zs = (j && Array.isArray(j.zutaten) ? j.zutaten : []).filter(z => z && z.name).slice(0, 80);
     const seen = new Set(), list = [];
     for (const z of zs) { const n = eng().resolve(String(z.name)); if (!n || seen.has(n)) continue; seen.add(n); list.push({n, on: true, unsure: z.sicher === false, known: !!eng().V[n]}); }
@@ -533,7 +490,6 @@ async function runPhoto() {
     showRecog(thumbs);
   } catch (e) {
     if (e && e.code === "cancelled") { out.innerHTML = `<p class="note">Abgebrochen.</p>`; photos = []; return; }
-    if (e && e.code === "bad_key") { out.innerHTML = thumbs + keyForm(errTxt(e)); g("kbKey").focus(); return; }
     out.innerHTML = thumbs + `<p class="kb-err">${H(errTxt(e))}</p><div class="kb-actions"><button class="btn primary" type="button" data-act="retry">Nochmal versuchen</button><button class="btn" type="button" data-act="cancel">Verwerfen</button></div>`;
   } finally { ctl = null; }
 }
@@ -557,12 +513,6 @@ function photoClick(e) {
   if (a === "cancel") { photos = []; recog = null; g("kbPhoto").innerHTML = ""; g("kbCam").focus(); }
   if (a === "retry") runPhoto();
   if (a === "more") { recog = null; g("kbCamIn").click(); }
-  if (a === "savekey") {
-    const k = g("kbKey").value.trim();
-    if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(k)) { g("kbPhoto").querySelector(".kb-key").insertAdjacentHTML("afterbegin", `<p class="kb-err" style="margin:0">Das sieht nicht wie ein API-Schlüssel aus. Er beginnt mit sk-ant-.</p>`); g("kbKey").focus(); return; }
-    try { localStorage.setItem("kb-apikey", k); } catch (er) {}
-    runPhoto();
-  }
   if (a === "take") {
     const add = recog.list.filter(z => z.on).map(z => eng().resolve(z.n)).filter(Boolean);
     add.forEach(n => { if (!items.includes(n)) items.push(n); }); saveItems();
@@ -570,7 +520,6 @@ function photoClick(e) {
     renderAll(); say(`${add.length} Zutaten übernommen. ${items.length} im Kühlschrank.`);
     const h = g("kbHaveH"); if (h) { h.tabIndex = -1; h.focus(); }
   }
-  if (a === "delkey") { try { localStorage.removeItem("kb-apikey"); } catch (er) {} b.closest("p").textContent = "API-Schlüssel gelöscht."; }
 }
 
 /* Rezeptfenster: was davon schon da ist */
@@ -588,11 +537,13 @@ function hookOpen() {
   w.__kb = true; openR = w;   // globale Funktion aus index.html ersetzen (wie Saison und Import)
 }
 
-function settingsNote() {
-  // Schlüssel löschen (nur iPhone-App)
-  if (!isLocal() || !apiKey()) return;
-  const p = doc.createElement("p"); p.className = "note"; p.innerHTML = `Fotoerkennung mit deinem API-Schlüssel ist eingerichtet. <button type="button" class="linkbtn" data-act="delkey">Schlüssel löschen</button>`;
-  g("kbPhoto").after(p); p.onclick = photoClick;
+// iPhone-App: Fotos werden nur in der Claude-App ausgewertet
+function photoAvail() {
+  if (!isLocal()) return;
+  ["kbCam", "kbLib"].forEach(id => { const b = g(id); if (b) b.hidden = true; });
+  const p = doc.createElement("p"); p.className = "note"; p.style.margin = "0";
+  p.textContent = "Kühlschrank fotografieren geht in der Claude-App (Rezeptkatalog öffnen, Tab „Kühlschrank“). Hier gibst du deine Zutaten über Kacheln und Suche an.";
+  g("kbPhoto").before(p);
 }
 
 function init() {
@@ -602,7 +553,7 @@ function init() {
   doc.addEventListener("tab-shown", e => { if (e.detail === "kuehl") show(); });
   doc.querySelector(".tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) setTimeout(show, 0); });
   let tries = 0; const wait = setInterval(() => { if ((typeof R !== "undefined" && R.length) || ++tries > 120) { clearInterval(wait); E = null; hookOpen(); renderHave(); show(); } }, 250);
-  settingsNote();
+  photoAvail();
 }
 if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", init); else init();
 })(typeof window !== "undefined" ? window : globalThis);

@@ -1,4 +1,4 @@
-/* Service Worker der Rezept-App, erzeugt von pipeline/pwa_build.py. Version: 4b4a9afd1b54
+/* Service Worker der Rezept-App, erzeugt von pipeline/pwa_build.py. Version: 7c173f1b48d1
    Alle App-Dateien werden beim Installieren geladen (offline nutzbar). Jede Datei hat einen Inhalts-Hash,
    bei Updates werden nur geänderte Dateien neu geladen. */
 const FILES = {
@@ -17,7 +17,7 @@ const FILES = {
  "icon-maskable-512.png": "531d81c336ed",
  "igliste.json": "8c82bcdc3b05",
  "index.html": "66d001b26a51",
- "kuehlschrank.js": "e7e81e13016e",
+ "kuehlschrank.js": "dc3de5c32a34",
  "manifest.webmanifest": "803ed8643b3c",
  "pwa-sync.js": "9ac5c5854ef9",
  "pwa.css": "6bbefd3e0b2b",
