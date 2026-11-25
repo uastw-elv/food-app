@@ -1,5 +1,5 @@
 /* PWA-Laufzeit für die Rezept-App (wird von pwa_build.py in index.html eingebettet).
-   1. Lokaler Ersatz für claude.use("db"), wenn die Seite nicht auf claude.ai läuft (speichert pro Gerät).
+   1. Ersatz für claude.use("db"), wenn die Seite nicht auf claude.ai läuft (lokal, Abgleich über pwa-sync.js).
    2. Entschlüsselt .json-Dateien beim fetch() (AES-GCM), Passwort einmal pro Gerät.
    3. Registriert den Service Worker (offline) und meldet neue Versionen. */
 (() => {
@@ -11,37 +11,75 @@
     del: k => { try { localStorage.removeItem(k) } catch (e) {} },
   };
 
-  /* ---------- 1. Lokale Datenbank ---------- */
+  /* ---------- 1. Datenbank: lokal pro Gerät, optional per pwa-sync.js mit einem privaten GitHub-Repo abgeglichen ----------
+     Eigene Änderungen: rk-sync-own = {Sammlung: {id: {d: Dokument|null (gelöscht), t: Zeitstempel}}}
+     Andere Geräte:     rk-sync-remote = {Datei: {sha, data: gleiche Form}}
+     Sichtbar ist je Dokument der neueste Stand über alle Geräte. */
   if (!window.claude) {
     const listeners = {};
-    const load = c => { try { return JSON.parse(LS.get("rk-db:" + c) || "{}") } catch (e) { return {} } };
+    const read = (k, dflt) => { try { return JSON.parse(LS.get(k) || "null") || dflt } catch (e) { return dflt } };
+    let own = read("rk-sync-own", null);
+    if (!own) { // Übernahme aus der ersten Version (rk-db:<Sammlung>)
+      own = {}; const now = Date.now();
+      try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i);
+        if (k && k.startsWith("rk-db:")) { const o = read(k, {}), c = k.slice(6); own[c] = {};
+          for (const id in o) own[c][id] = { d: o[id], t: now }; } } } catch (e) {}
+      LS.set("rk-sync-own", JSON.stringify(own));
+    }
+    let remote = read("rk-sync-remote", {});
+    const view = c => {
+      const best = {};
+      const add = m => { for (const id in (m && m[c]) || {}) { const e = m[c][id]; if (!best[id] || e.t > best[id].t) best[id] = e; } };
+      add(own); for (const f in remote) add(remote[f].data);
+      const o = {}; for (const id in best) if (best[id].d != null) o[id] = best[id].d;
+      return o;
+    };
+    const notify = c => (c ? [c] : Object.keys(listeners)).forEach(k => (listeners[k] || []).forEach(f => { try { f() } catch (e) {} }));
+    const write = (c, id, d) => {
+      own[c] = own[c] || {};
+      // Zeitstempel immer größer als alle bekannten, auch bei falsch gehender Uhr
+      let t = Date.now(); for (const f in remote) { const e = remote[f].data && remote[f].data[c] && remote[f].data[c][id]; if (e && e.t >= t) t = e.t + 1; }
+      own[c][id] = { d: d == null ? null : JSON.parse(JSON.stringify(d)), t };
+      LS.set("rk-sync-own", JSON.stringify(own)); LS.set("rk-sync-dirty", "1");
+      notify(c); window.dispatchEvent(new Event("rk-db-change"));
+    };
     const snap = c => {
-      const o = load(c), docs = Object.keys(o).map(id => ({ id, exists: true, data: () => o[id] }));
+      const o = view(c), docs = Object.keys(o).map(id => ({ id, exists: true, data: () => o[id] }));
       return { docs, size: docs.length, empty: !docs.length, forEach: f => docs.forEach(f) };
     };
-    const docSnap = (c, id) => { const o = load(c); return { id, exists: id in o, data: () => o[id] }; };
-    const store = (c, o) => {
-      LS.set("rk-db:" + c, JSON.stringify(o));
-      (listeners[c] || []).forEach(f => { try { f() } catch (e) {} });
-    };
+    const docSnap = (c, id) => { const o = view(c); return { id, exists: id in o, data: () => o[id] }; };
     const watch = (c, fn) => { (listeners[c] = listeners[c] || []).push(fn); setTimeout(fn, 0);
       return () => { listeners[c] = listeners[c].filter(x => x !== fn); }; };
     const collection = c => ({
       doc: id => ({
         id,
-        set: async d => { const o = load(c); o[id] = JSON.parse(JSON.stringify(d)); store(c, o); },
-        update: async d => { const o = load(c); o[id] = Object.assign({}, o[id] || {}, JSON.parse(JSON.stringify(d))); store(c, o); },
-        delete: async () => { const o = load(c); delete o[id]; store(c, o); },
+        set: async d => write(c, id, d),
+        update: async d => write(c, id, Object.assign({}, view(c)[id] || {}, JSON.parse(JSON.stringify(d)))),
+        delete: async () => write(c, id, null),
         get: async () => docSnap(c, id),
         onSnapshot: cb => watch(c, () => cb(docSnap(c, id))),
       }),
-      add: async d => { const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        const o = load(c); o[id] = JSON.parse(JSON.stringify(d)); store(c, o); return { id }; },
+      add: async d => { const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); write(c, id, d); return { id }; },
       get: async () => snap(c),
       onSnapshot: cb => watch(c, () => cb(snap(c))),
     });
     const DB = { collection, local: true };
     window.claude = { local: true, use: async name => (name === "db" ? DB : null) };
+    // Schnittstelle für pwa-sync.js
+    window.__rkStore = {
+      own: () => own,
+      remote: () => remote,
+      setRemote: r => { remote = r; LS.set("rk-sync-remote", JSON.stringify(remote)); notify(); },
+      mergeOwn: m => { // eigene Datei vom Server (z. B. nach Neuinstallation) mit lokalem Stand zusammenführen
+        let changed = false;
+        for (const c in m || {}) for (const id in m[c]) { own[c] = own[c] || {};
+          if (!own[c][id] || m[c][id].t > own[c][id].t) { own[c][id] = m[c][id]; changed = true; } }
+        if (changed) { LS.set("rk-sync-own", JSON.stringify(own)); notify(); }
+        return changed;
+      },
+      dirty: () => LS.get("rk-sync-dirty") === "1",
+      clean: () => LS.del("rk-sync-dirty"),
+    };
   }
 
   /* ---------- 2. Entschlüsselung ---------- */
