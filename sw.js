@@ -1,12 +1,12 @@
-/* Service Worker der Rezept-App, erzeugt von pipeline/pwa_build.py. Version: b9e10610bb97
+/* Service Worker der Rezept-App, erzeugt von pipeline/pwa_build.py. Version: 0a2371efbdf5
    Alle App-Dateien werden beim Installieren geladen (offline nutzbar). Jede Datei hat einen Inhalts-Hash,
    bei Updates werden nur geänderte Dateien neu geladen. */
 const FILES = {
  "apple-touch-icon.png": "54757c14fb64",
- "bilder.json": "ff19526ed3cf",
- "bilder_0.json": "d6e83b03efa3",
- "bilder_1.json": "000b898ebaea",
- "bilder_2.json": "2732f89c57b6",
+ "bilder.json": "0bb7fd709ee9",
+ "bilder_0.json": "aa595e677042",
+ "bilder_1.json": "7d7bf5d7f97e",
+ "bilder_2.json": "dc0421c9bda6",
  "fonts/BricolageGrotesque-latin-ext.woff2": "1d04719f1325",
  "fonts/BricolageGrotesque-latin.woff2": "85f55a58a31e",
  "fonts/Inter-latin-ext.woff2": "a28eb6d3ccb5",
@@ -16,12 +16,13 @@ const FILES = {
  "icon-512.png": "5d58c1be9a93",
  "icon-maskable-512.png": "531d81c336ed",
  "igliste.json": "8c82bcdc3b05",
- "index.html": "2513d0bb1812",
+ "index.html": "66d001b26a51",
+ "kuehlschrank.js": "dc3de5c32a34",
  "manifest.webmanifest": "803ed8643b3c",
  "pwa-sync.js": "9ac5c5854ef9",
  "pwa.css": "6bbefd3e0b2b",
  "pwa.js": "21269b5b7975",
- "rezepte.json": "f20c1f03014a",
+ "rezepte.json": "abc833ac7bfe",
  "saison.js": "463bb4d8d782",
  "saison.json": "ae61580f7ac0",
  "wochenplan.js": "29172e52cff8"
